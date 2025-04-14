@@ -164,6 +164,36 @@ def filter_recommendations_by_time(
     """
     return [r for r in recommendations if r.get('average_order_time', 0) <= max_time]
 
+def get_highest_rated_restaurant(metadata: Dict, max_time: float) -> Optional[Dict]:
+    """
+    Get the highest-rated restaurant from metadata with order time under max_time.
+    
+    Args:
+        metadata: Restaurant metadata dictionary (from create_restaurant_metadata())
+                  Expected structure is a dict of columns where each key is a column name
+                  and each value is a dict with restaurant names as keys.
+        max_time: Max total order time in minutes
+    
+    Returns:
+        Dictionary with the restaurant name and other metadata, or None if no match.
+    """
+    # Convert the dictionary of columns back to a DataFrame.
+    # Specify orient='columns' for clarity (the default works too).
+    df = pd.DataFrame.from_dict(metadata, orient='columns')
+    
+    # At this point, the DataFrame's index is the restaurant names.
+    # Reset the index to turn it into a column named "index", then rename it.
+    df = df.reset_index().rename(columns={'index': 'restaurant_name'})
+    
+    # Filter restaurants by the provided maximum order time.
+    df_filtered = df[df['average_order_time'] <= max_time]
+    if df_filtered.empty:
+        return None
+
+    # Sort by average rating in descending order and pick the top restaurant.
+    top_restaurant = df_filtered.sort_values(by='average_rating', ascending=False).iloc[0]
+    return top_restaurant.to_dict()
+
 def main():
     # App title
     st.title("NYC Food Recommender System 🍔")
@@ -191,7 +221,11 @@ def main():
             return
     
     # Create tabs
-    tab1, tab2 = st.tabs(["Restaurant-Based Recommendations", "Customer-Based Recommendations"])
+    tab1, tab2, tab3 = st.tabs([
+    "Restaurant-Based Recommendations", 
+    "Customer-Based Recommendations",
+    "Best Rated Restaurant"
+])
     
     # Process data
     with st.spinner("Processing data..."):
@@ -371,6 +405,31 @@ def main():
                     customer_rec_df = pd.DataFrame(filtered_customer_recs)
                     customer_rec_df.columns = ['Restaurant Name', 'Cuisine Type', 'Avg. Rating', 'Avg. Cost ($)', 'Avg. Order Time (min)', 'Similarity (%)']
                     st.dataframe(customer_rec_df.sort_values('Similarity (%)', ascending=False), use_container_width=True)
+    # Best Rated Restaurant Tab
+    with tab3:
+        st.header("Top Rated Restaurant (Simple Recommendation)")
+        
+        # Time constraint
+        best_time_limit = st.slider(
+            "Maximum total order time (minutes):", 
+            min_value=10, 
+            max_value=90, 
+            value=60,
+            step=5,
+            key="best_time_slider"
+        )
+        
+        if st.button("Find Best Rated Restaurant"):
+            top_restaurant = get_highest_rated_restaurant(restaurant_data, best_time_limit)
+            
+            if top_restaurant:
+                st.subheader(f"🍽️ {top_restaurant['restaurant_name']}")
+                st.write(f"**Cuisine:** {top_restaurant['cuisine_type']}")
+                st.write(f"**Average Rating:** {top_restaurant['average_rating']}")
+                st.write(f"**Average Cost:** ${top_restaurant['average_order_cost']}")
+                st.write(f"**Average Order Time:** {top_restaurant['average_order_time']} minutes")
+            else:
+                st.warning("No restaurant meets the selected time constraint.")
 
 if __name__ == "__main__":
     main()
