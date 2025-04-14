@@ -4,6 +4,9 @@ import pandas as pd
 import os
 from sklearn.metrics.pairwise import cosine_similarity
 from typing import List, Tuple, Dict, Optional
+from tensorflow.keras.models import load_model
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+import joblib
 
 # Set page title and configuration
 st.set_page_config(
@@ -169,6 +172,34 @@ def main():
     st.title("NYC Food Recommender System 🍔")
     st.markdown("Get personalized restaurant recommendations based on your preferences")
     
+    # Check if model and encoders exist, show a message if they don't
+    models_exist = os.path.exists("models/deep/ncf_model.h5") and \
+                 os.path.exists("models/deep/user_encoder.pkl") and \
+                 os.path.exists("models/deep/item_encoder.pkl") and \
+                 os.path.exists("models/deep/delivery_scaler.pkl") and \
+                 os.path.exists("models/deep/prep_scaler.pkl")
+    
+    if not models_exist:
+        st.warning("""
+        Some model files are missing. Please run the ncf_from_scratch.py script first
+        to generate the model files, or upload them to the 'models' directory.
+        
+        The collaborative filtering features will be disabled until the model files are available.
+        """)
+    else:
+        # Load saved model and encoders
+        try:
+            model = load_model("models/deep/ncf_model.h5")
+            user_encoder = joblib.load("models/deep/user_encoder.pkl")
+            item_encoder = joblib.load("models/deep/item_encoder.pkl")
+            delivery_scaler = joblib.load("models/deep/delivery_scaler.pkl")
+            prep_scaler = joblib.load("models/deep/prep_scaler.pkl")
+            num_items = len(item_encoder.classes_)  # total number of unique restaurants
+            st.success("Deep learning model loaded successfully!")
+        except Exception as e:
+            st.error(f"Error loading model: {e}")
+            models_exist = False
+    
     # File upload option or use default path
     uploaded_file = st.file_uploader("Upload your food order CSV file", type=["csv"])
     
@@ -190,8 +221,21 @@ def main():
             st.error(f"Error loading default dataset: {e}")
             return
     
+    st.info("Using the same dataset that was used to train the model to ensure consistency.")
+    try:
+        # Use the exact same dataset path as in ncf_from_scratch.py
+        default_path = "data/food_order.csv"
+        if os.path.exists(default_path):
+            df = pd.read_csv(default_path)
+        else:
+            st.error("Training dataset not found at data/food_order.csv. Please ensure the file exists.")
+            return
+    except Exception as e:
+        st.error(f"Error loading training dataset: {e}")
+        return
+
     # Create tabs
-    tab1, tab2 = st.tabs(["Restaurant-Based Recommendations", "Customer-Based Recommendations"])
+    tab1, tab2, tab3 = st.tabs(["Restaurant-Based Recommendations", "Customer-Based Recommendations", "Deep Learning Recommender"])
     
     # Process data
     with st.spinner("Processing data..."):
@@ -211,6 +255,14 @@ def main():
         restaurant_list = rest_df.index.tolist()
         customer_list = filtered_df['customer_id'].unique().tolist()
     
+
+    # Find the min and max order times in the dataset
+    min_order_time = int(filtered_df['total_order_time'].min())
+    max_order_time = int(filtered_df['total_order_time'].max())
+
+    # Round max_order_time up to the nearest 5 for cleaner UI
+    max_order_time = ((max_order_time // 5) + 1) * 5
+
     # Restaurant-Based Recommendations Tab
     with tab1:
         st.header("Find Similar Restaurants")
@@ -233,9 +285,9 @@ def main():
         # Order time filter
         max_order_time = st.slider(
             "Maximum total order time (minutes):", 
-            min_value=10, 
-            max_value=90, 
-            value=60,
+            min_value=min_order_time, 
+            max_value=max_order_time, 
+            value=min(60, max_order_time),
             step=5
         )
         
@@ -315,9 +367,9 @@ def main():
         # Order time filter
         max_customer_order_time = st.slider(
             "Maximum total order time (minutes):", 
-            min_value=10, 
-            max_value=90, 
-            value=60,
+            min_value=min_order_time, 
+            max_value=max_order_time, 
+            value=min(60, max_order_time),
             step=5,
             key="customer_time_slider"
         )
@@ -371,6 +423,165 @@ def main():
                     customer_rec_df = pd.DataFrame(filtered_customer_recs)
                     customer_rec_df.columns = ['Restaurant Name', 'Cuisine Type', 'Avg. Rating', 'Avg. Cost ($)', 'Avg. Order Time (min)', 'Similarity (%)']
                     st.dataframe(customer_rec_df.sort_values('Similarity (%)', ascending=False), use_container_width=True)
+        
+    # Deep Learning Recommender Tab
+    with tab3:
+        st.header("NCF-Based Personalized Recommendations 🔮")
+        st.markdown("This model uses a deep neural network trained on historical order data.")
 
+        # Check if models exist before proceeding
+        if not models_exist:
+            st.error("Deep learning model not available. Please run the ncf_from_scratch.py script first.")
+        else:
+            try:
+                # Use the EXACT same preprocessing steps as in ncf_from_scratch.py
+                df_full = pd.read_csv("data/food_order.csv")  # Use original training data
+                
+                # Filter and preprocess ratings exactly like in training
+                df_full = df_full[df_full["rating"] != "Not given"]
+                df_full["rating"] = df_full["rating"].astype(float)
+                
+                # Apply the saved encoders - use transform, not fit_transform
+                df_full["user"] = user_encoder.transform(df_full["customer_id"])
+                df_full["item"] = item_encoder.transform(df_full["restaurant_name"])
+                
+                # Build user history in the same way as training
+                user_history = {}
+                past_restaurants_col = []
+                
+                for idx, row in df_full.sort_values(["customer_id", "order_id"]).iterrows():
+                    user = row["customer_id"]
+                    if user not in user_history:
+                        user_history[user] = []
+                    past_restaurants_col.append(user_history[user].copy())
+                    user_history[user].append(row["item"])
+                
+                df_full["past_restaurants"] = past_restaurants_col
+                
+                # Customer selection for NCF recommendations
+                ncf_selected_customer = st.selectbox(
+                    "Select a customer ID for deep learning recommendations:", 
+                    [""] + customer_list,
+                    index=0,
+                    key="ncf_customer_select"
+                )
+                
+                # Custom customer ID input for NCF
+                ncf_custom_customer = st.text_input("Or type a customer ID for deep learning recommendations:", key="ncf_customer_input")
+                
+                # Use custom input if provided
+                if ncf_custom_customer:
+                    ncf_customer_to_use = ncf_custom_customer
+                else:
+                    ncf_customer_to_use = ncf_selected_customer
+                
+                if st.button("Get Deep Learning Recommendations") and ncf_customer_to_use:
+                    # Check if the customer exists in the dataset
+                    if ncf_customer_to_use not in df_full["customer_id"].values:
+                        st.error(f"Customer ID '{ncf_customer_to_use}' not found in the dataset.")
+                    else:
+                        # Get user history
+                        user_data = df_full[df_full["customer_id"] == ncf_customer_to_use].sort_values("order_id")
+                        
+                        if len(user_data) == 0:
+                            st.error("No order history found for this customer.")
+                        else:
+                            # Get encoded user index
+                            user_index = user_encoder.transform([ncf_customer_to_use])[0]
+                            
+                            # Get user's past restaurants (get the last row for this user)
+                            user_last_row = user_data.iloc[-1]
+                            past_restaurants = user_last_row["past_restaurants"]
+                            
+                            # Calculate mean values for features
+                            delivery_time_mean = df_full["delivery_time"].mean()
+                            prep_time_mean = df_full["food_preparation_time"].mean()
+                            
+                            # Important: Normalize the delivery and prep times using the saved scalers
+                            delivery_norm = delivery_scaler.transform([[delivery_time_mean]])[0][0]
+                            prep_norm = prep_scaler.transform([[prep_time_mean]])[0][0]
+                            
+                            # Debug info
+                            st.info(f"Debug: Raw delivery time: {delivery_time_mean}, Normalized: {delivery_norm}")
+                            st.info(f"Debug: Raw prep time: {prep_time_mean}, Normalized: {prep_norm}")
+                            
+                            # Pad the history sequence
+                            padded_hist = pad_sequences([past_restaurants], maxlen=10, padding='post', truncating='post')[0]
+                            
+                            # Predict scores for all restaurants
+                            item_ids = np.arange(num_items)
+                            user_arr = np.full(num_items, user_index)
+                            delivery_arr = np.full(num_items, delivery_norm)  # Use normalized value
+                            prep_arr = np.full(num_items, prep_norm)  # Use normalized value
+                            hist_arr = np.tile(padded_hist, (num_items, 1))
+                            
+                            with st.spinner("Generating recommendations..."):
+                                predictions = model.predict(
+                                    [user_arr, item_ids, delivery_arr, prep_arr, hist_arr], 
+                                    verbose=0
+                                ).flatten()
+                            
+                            # Display prediction stats for debugging
+                            st.write(f"Prediction stats - Min: {predictions.min():.4f}, Max: {predictions.max():.4f}, Mean: {predictions.mean():.4f}")
+                            
+                            # Get top 10 recommendations
+                            top_n = 10
+                            top_indices = predictions.argsort()[-top_n:][::-1]
+                            top_restaurants = item_encoder.inverse_transform(top_indices)
+                            top_scores = predictions[top_indices]
+                            
+                            # Display user's order history
+                            st.subheader(f"Order History for {ncf_customer_to_use}:")
+                            history_restaurants = user_data["restaurant_name"].tolist()
+                            history_ratings = user_data["rating"].tolist()
+                            
+                            history_df = pd.DataFrame({
+                                "Restaurant": history_restaurants,
+                                "Rating": history_ratings
+                            })
+                            
+                            st.dataframe(history_df)
+                            
+                            # Display recommendations
+                            st.subheader(f"Top {top_n} Recommended Restaurants:")
+                            
+                            # Create dataframe with recommendations and additional info
+                            result_df = pd.DataFrame({
+                                "Restaurant": top_restaurants,
+                                "Predicted Score": np.round(top_scores, 4)
+                            })
+                            
+                            # Add additional restaurant info if available
+                            restaurant_info = []
+                            for rest in top_restaurants:
+                                if rest in restaurant_data['cuisine_type']:
+                                    info = {
+                                        "Cuisine": restaurant_data['cuisine_type'][rest],
+                                        "Avg. Rating": restaurant_data['average_rating'][rest],
+                                        "Avg. Cost": restaurant_data['average_order_cost'][rest],
+                                        "Avg. Order Time": restaurant_data['average_order_time'][rest]
+                                    }
+                                    restaurant_info.append(info)
+                                else:
+                                    restaurant_info.append({
+                                        "Cuisine": "Unknown",
+                                        "Avg. Rating": np.nan,
+                                        "Avg. Cost": np.nan,
+                                        "Avg. Order Time": np.nan
+                                    })
+                            
+                            # Add info to result dataframe
+                            info_df = pd.DataFrame(restaurant_info)
+                            result_df = pd.concat([result_df, info_df], axis=1)
+                            
+                            # Convert any remaining "N/A" strings to NaN
+                            result_df = result_df.replace("N/A", np.nan)
+
+                            st.dataframe(result_df)
+                            
+            except Exception as e:
+                st.error(f"Error in recommendation system: {e}")
+                st.info("This could happen if there are inconsistencies between the model encoders and current data.")
+                    
 if __name__ == "__main__":
     main()
