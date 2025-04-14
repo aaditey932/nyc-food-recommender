@@ -255,6 +255,14 @@ def main():
         restaurant_list = rest_df.index.tolist()
         customer_list = filtered_df['customer_id'].unique().tolist()
     
+
+    # Find the min and max order times in the dataset
+    min_order_time = int(filtered_df['total_order_time'].min())
+    max_order_time = int(filtered_df['total_order_time'].max())
+
+    # Round max_order_time up to the nearest 5 for cleaner UI
+    max_order_time = ((max_order_time // 5) + 1) * 5
+
     # Restaurant-Based Recommendations Tab
     with tab1:
         st.header("Find Similar Restaurants")
@@ -277,9 +285,9 @@ def main():
         # Order time filter
         max_order_time = st.slider(
             "Maximum total order time (minutes):", 
-            min_value=10, 
-            max_value=90, 
-            value=60,
+            min_value=min_order_time, 
+            max_value=max_order_time, 
+            value=min(60, max_order_time),
             step=5
         )
         
@@ -359,9 +367,9 @@ def main():
         # Order time filter
         max_customer_order_time = st.slider(
             "Maximum total order time (minutes):", 
-            min_value=10, 
-            max_value=90, 
-            value=60,
+            min_value=min_order_time, 
+            max_value=max_order_time, 
+            value=min(60, max_order_time),
             step=5,
             key="customer_time_slider"
         )
