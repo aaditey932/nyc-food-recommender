@@ -568,8 +568,8 @@ def main():
                                     verbose=0
                                 ).flatten()
                             
-                            # Get top 10 recommendations
-                            top_n = 10
+                            # Get top 5 recommendations
+                            top_n = 5
                             top_indices = predictions.argsort()[-top_n:][::-1]
                             top_restaurants = item_encoder.inverse_transform(top_indices)
                             top_scores = predictions[top_indices]
