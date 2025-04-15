@@ -3,7 +3,7 @@ import numpy as np
 import os
 from sklearn.preprocessing import LabelEncoder, MinMaxScaler
 from tensorflow.keras.models import Model
-from tensorflow.keras.layers import Input, Embedding, Flatten, Concatenate, Dense
+from tensorflow.keras.layers import Input, Embedding, Flatten, Concatenate, Dense, Multiply
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.losses import BinaryCrossentropy
 from tensorflow.keras.preprocessing.sequence import pad_sequences
@@ -108,41 +108,87 @@ def generate_training_data(train_df, num_items, num_neg=4):
 train_users, train_items, train_delivery_times, train_prep_times, train_histories, train_labels = generate_training_data(train, num_items)
 
 # Define Keras model
-def build_model(num_users, num_items, embed_dim=32):
-    user_input = Input(shape=(1,))
-    item_input = Input(shape=(1,))
-    delivery_input = Input(shape=(1,))
-    prep_input = Input(shape=(1,))
-    history_input = Input(shape=(None,), dtype='int32')
-
-    user_embed = Embedding(num_users, embed_dim)(user_input)
-    item_embed = Embedding(num_items, embed_dim)(item_input)
-    history_embed = Embedding(num_items, embed_dim)(history_input)
-
-    user_vec = Flatten()(user_embed)
-    item_vec = Flatten()(item_embed)
+def build_ncf_model(num_users, num_items, mf_dim=16, mlp_dim=16, layers=[64, 32, 16]):
+    """
+    Build a Neural Collaborative Filtering model based on the provided architecture diagram.
+    
+    Args:
+        num_users: Number of unique users in the dataset
+        num_items: Number of unique items in the dataset
+        mf_dim: Dimension of the Matrix Factorization embedding
+        mlp_dim: Dimension of the MLP embedding
+        layers: List of layer dimensions for the MLP component
+    """
+    # Input layers
+    user_input = Input(shape=(1,), name='user_input')
+    item_input = Input(shape=(1,), name='item_input')
+    delivery_input = Input(shape=(1,), name='delivery_input')
+    prep_input = Input(shape=(1,), name='prep_input')
+    history_input = Input(shape=(None,), name='history_input', dtype='int32')
+    
+    # Embedding layers for context features
+    history_embed = Embedding(num_items, mlp_dim, name='history_embedding')(history_input)
     history_vec = GlobalAveragePooling1D()(history_embed)
-
-    delivery_dense = Dense(embed_dim, activation='relu')(delivery_input)
-    prep_dense = Dense(embed_dim, activation='relu')(prep_input)
-
+    
+    # Process delivery and prep time features
+    delivery_dense = Dense(mlp_dim, activation='relu')(delivery_input)
+    prep_dense = Dense(mlp_dim, activation='relu')(prep_input)
+    
     delivery_vec = Flatten()(delivery_dense)
     prep_vec = Flatten()(prep_dense)
-
-    full_item_vec = Concatenate()([item_vec, delivery_vec, prep_vec])
-    full_user_vec = Concatenate()([user_vec, history_vec])
-
-    x = Concatenate()([full_user_vec, full_item_vec])
-    x = Dense(64, activation='relu')(x)
-    x = Dense(32, activation='relu')(x)
-    output = Dense(1, activation='sigmoid')(x)
-
-    model = Model(inputs=[user_input, item_input, delivery_input, prep_input, history_input], outputs=output)
-    model.compile(optimizer=Adam(0.001), loss=BinaryCrossentropy(), metrics=['accuracy'])
+    
+    # Matrix Factorization Part (GMF)
+    mf_user_embedding = Embedding(num_users, mf_dim, name='mf_user_embedding')(user_input)
+    mf_item_embedding = Embedding(num_items, mf_dim, name='mf_item_embedding')(item_input)
+    
+    mf_user_latent = Flatten()(mf_user_embedding)
+    mf_item_latent = Flatten()(mf_item_embedding)
+    
+    # Element-wise product for GMF
+    mf_vector = Multiply()([mf_user_latent, mf_item_latent])
+    
+    # Non-linear transformation of dot product (GMF Layer)
+    gmf_output = Dense(mf_dim, activation='relu', name='gmf_layer')(mf_vector)
+    
+    # MLP Part
+    mlp_user_embedding = Embedding(num_users, mlp_dim, name='mlp_user_embedding')(user_input)
+    mlp_item_embedding = Embedding(num_items, mlp_dim, name='mlp_item_embedding')(item_input)
+    
+    mlp_user_latent = Flatten()(mlp_user_embedding)
+    mlp_item_latent = Flatten()(mlp_item_embedding)
+    
+    # Concatenate user and item vectors for MLP path
+    mlp_vector = Concatenate()([mlp_user_latent, mlp_item_latent])
+    
+    # MLP Layers with ReLU activation
+    for i, layer_size in enumerate(layers):
+        layer_name = f'mlp_layer_{i+1}'
+        mlp_vector = Dense(layer_size, activation='relu', name=layer_name)(mlp_vector)
+    
+    # Combining context features with MLP path
+    context_vector = Concatenate()([history_vec, delivery_vec, prep_vec])
+    enhanced_mlp = Concatenate()([mlp_vector, context_vector])
+    
+    # Concatenate GMF and MLP parts (NeuMF Layer)
+    neufm_vector = Concatenate()([gmf_output, enhanced_mlp])
+    
+    # Final prediction layer
+    output = Dense(1, activation='sigmoid', name='prediction')(neufm_vector)
+    
+    model = Model(
+        inputs=[user_input, item_input, delivery_input, prep_input, history_input],
+        outputs=output
+    )
+    model.compile(
+        optimizer=Adam(0.001),
+        loss=BinaryCrossentropy(),
+        metrics=['accuracy']
+    )
+    
     return model
 
 print("Building NCF model...")
-model = build_model(num_users, num_items)
+model = build_ncf_model(num_users, num_items)
 model.summary()
 
 # Pad histories for training
