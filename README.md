@@ -63,7 +63,6 @@ A working **Streamlit app** is included to demonstrate the full recommendation p
 
 📍 Hosted version: [Click to open](https://impatient-taster.streamlit.app/)
 
-*Note: Replace the link above with your actual deployment URL.*
 
 ---
 
@@ -74,11 +73,7 @@ A working **Streamlit app** is included to demonstrate the full recommendation p
 python -m venv venv
 source venv/bin/activate        # macOS/Linux
 venv\Scripts\activate           # Windows
-
-
 #### 3. Install Dependencies
-
-```bash
 pip install -r requirements.txt
 ```
 
