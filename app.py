@@ -267,13 +267,12 @@ def main():
     # Create tabs
 
     tab1, tab2, tab3, tab4 = st.tabs([
-    "Restaurant-Based Recommendations", 
-    "Customer-Based Recommendations",
-    "Best Rated Restaurant",
-    "Deep Learning Recommender"
+    "Restaurant-Based Recommendations (ML)", 
+    "Customer-Based Recommendations (ML)",
+    "Best Rated Restaurant (Naive)",
+    "NCF-Based Recommender (Deep Learning)"
     
 ])
-
     
     # Process data
     with st.spinner("Processing data..."):
