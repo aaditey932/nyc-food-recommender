@@ -20,7 +20,8 @@ The dataset used in this project is sourced from food ordering history in NYC an
 ---
 
 ## 🧪 Approaches Implemented 
-### [model](models) include pkl files and scripts
+### [`models/`](models)
+Contains model checkpoint `.pkl` files along with training and inference scripts.
 
 ### ✅ 1. **Naïve Approach**
 
