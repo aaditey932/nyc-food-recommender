@@ -293,7 +293,6 @@ def main():
         restaurant_list = rest_df.index.tolist()
         customer_list = filtered_df['customer_id'].unique().tolist()
     
-
     # Find the min and max order times in the dataset
     min_order_time = int(filtered_df['total_order_time'].min())
     max_order_time = int(filtered_df['total_order_time'].max())
@@ -384,14 +383,7 @@ def main():
             index=0
         )
         
-        # Custom customer ID input
-        custom_customer = st.text_input("Or type a customer ID:")
-        
-        # Use custom input if provided
-        if custom_customer:
-            customer_to_use = custom_customer
-        else:
-            customer_to_use = selected_customer
+        customer_to_use = selected_customer
         
         # Number of recommendations slider
         num_customer_recs = st.slider(
@@ -523,22 +515,17 @@ def main():
                 
                 df_full["past_restaurants"] = past_restaurants_col
                 
+                dl_customer_list = df_full['customer_id'].unique().tolist()
+
                 # Customer selection for NCF recommendations
                 ncf_selected_customer = st.selectbox(
                     "Select a customer ID for deep learning recommendations:", 
-                    [""] + customer_list,
+                    [""] + dl_customer_list,
                     index=0,
                     key="ncf_customer_select"
                 )
                 
-                # Custom customer ID input for NCF
-                ncf_custom_customer = st.text_input("Or type a customer ID for deep learning recommendations:", key="ncf_customer_input")
-                
-                # Use custom input if provided
-                if ncf_custom_customer:
-                    ncf_customer_to_use = ncf_custom_customer
-                else:
-                    ncf_customer_to_use = ncf_selected_customer
+                ncf_customer_to_use = ncf_selected_customer
                 
                 if st.button("Get Deep Learning Recommendations") and ncf_customer_to_use:
                     # Check if the customer exists in the dataset
@@ -566,10 +553,6 @@ def main():
                             delivery_norm = delivery_scaler.transform([[delivery_time_mean]])[0][0]
                             prep_norm = prep_scaler.transform([[prep_time_mean]])[0][0]
                             
-                            # Debug info
-                            st.info(f"Debug: Raw delivery time: {delivery_time_mean}, Normalized: {delivery_norm}")
-                            st.info(f"Debug: Raw prep time: {prep_time_mean}, Normalized: {prep_norm}")
-                            
                             # Pad the history sequence
                             padded_hist = pad_sequences([past_restaurants], maxlen=10, padding='post', truncating='post')[0]
                             
@@ -585,9 +568,6 @@ def main():
                                     [user_arr, item_ids, delivery_arr, prep_arr, hist_arr], 
                                     verbose=0
                                 ).flatten()
-                            
-                            # Display prediction stats for debugging
-                            st.write(f"Prediction stats - Min: {predictions.min():.4f}, Max: {predictions.max():.4f}, Mean: {predictions.mean():.4f}")
                             
                             # Get top 10 recommendations
                             top_n = 10
